@@ -1,0 +1,148 @@
+#include "ch32fun.h"
+#include <stdio.h>
+
+/* Pin connections:
+   PWM (out) on PD0
+   Encoder TRA (in) on PD2
+   Encoder TRB (in) on PD3
+
+   Standard CPU fans use a 25kHz PWM input.
+   We're using a 48MHz HCLK.
+*/
+#define PWM_PERIOD 1920
+#define PWM_STEP 200
+
+/*! Initialize TIM1 for PWM on PD0
+ * 
+ * This was adapted from the ch32fun tim1_pwm example by Eric Brombaugh.
+ */
+void t1pwm_init( void )
+{
+  // Enable GPIOD and TIM1
+  RCC->APB2PCENR |=
+    RCC_APB2Periph_GPIOD |
+    RCC_APB2Periph_TIM1;
+
+  // PD0 is T1CH1N, 50MHz Output alt func, open drain
+  GPIOD->CFGLR &= ~(0xf<<(4*0));
+  GPIOD->CFGLR |= (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD_AF)<<(4*0);
+
+  // Reset TIM1 to init all regs
+  RCC->APB2PRSTR |= RCC_APB2Periph_TIM1;
+  RCC->APB2PRSTR &= ~RCC_APB2Periph_TIM1;
+
+  // CTLR1: default is up, events generated, edge align
+  // SMCFGR: default clk input is CK_INT
+
+  // Prescaler 
+  TIM1->PSC = 0x0000;
+
+  // Auto Reload - sets period
+  TIM1->ATRLR = PWM_PERIOD;
+
+  // Reload immediately
+  TIM1->SWEVGR |= TIM_UG;
+
+  // Enable CH1N output, positive pol
+  TIM1->CCER |= TIM_CC1NE | TIM_CC1NP;
+
+  // CH1 Mode is output, PWM1 (CC1S = 00, OC1M = 110)
+  TIM1->CHCTLR1 |= TIM_OC1M_2 | TIM_OC1M_1;
+
+  // Start at 100% width which is low speed.
+  TIM1->CH1CVR = PWM_PERIOD;
+
+  // Enable TIM1 outputs
+  TIM1->BDTR |= TIM_MOE;
+
+  // Enable TIM1
+  TIM1->CTLR1 |= TIM_CEN;
+}
+
+#define CFGLF_PD2_SHIFT (2 * 4)
+#define CFGLF_PD3_SHIFT (3 * 4)
+
+/*! Set up rotary encoder inputs on PD3 and PD4
+ *
+ */
+void encoder_init() {
+    /* Enable GPIOD and AFIO */
+    RCC->APB2PCENR |= RCC_APB2Periph_GPIOD | RCC_APB2Periph_AFIO;
+
+    /* Encoder TRA on PD2 */
+    GPIOD->CFGLR &= ~(0xF << CFGLF_PD2_SHIFT);
+    GPIOD->CFGLR |=  (GPIO_CNF_IN_PUPD << CFGLF_PD2_SHIFT);
+    GPIOD->OUTDR |=  (1 << 2);
+
+    /* Encoder TRB on PD3 */
+    GPIOD->CFGLR &= ~(0xF << CFGLF_PD3_SHIFT);
+    GPIOD->CFGLR |=  (GPIO_CNF_IN_PUPD << CFGLF_PD3_SHIFT);
+    GPIOD->OUTDR |=  (1 << 3);
+
+    /* Set up interrupt on TRA (PD2) */
+    AFIO->EXTICR = AFIO_EXTICR_EXTI2_PD;
+    EXTI->INTENR = EXTI_INTENR_MR2;
+    EXTI->RTENR = EXTI_RTENR_TR2;
+
+    NVIC_EnableIRQ(EXTI7_0_IRQn);
+}
+
+// I see a lot of bounce in my rotary encoder, so I'm just setting the
+// rotary direction here and using the delay in the loop as a crude debounce.
+// This mostly works, but I do see some bounce-caused direction errors when
+// moving the wheel quickly. There are better solutions, but this will work
+// for controlling my fan.
+static int gDir;
+
+/* EXTI ISR (lines 0-7 share one vector on CH32V003) */
+void EXTI7_0_IRQHandler(void) __attribute__((interrupt));
+void EXTI7_0_IRQHandler(void)
+{
+  if (EXTI->INTFR & (1 << 2)) {
+    if (GPIOD->INDR & (1 << 3)) {
+      // Counter-clockwise
+      gDir = 1;
+    } else {
+      // Clockwise
+      gDir = -1;
+    }
+
+    // Clear
+    EXTI->INTFR |= (1 << 2);
+  }
+}
+
+int main()
+{
+  SystemInit();
+  Delay_Ms( 100 );
+
+  printf("Initializing...\n\r");
+  t1pwm_init();
+  encoder_init();
+
+  printf("Starting...\n\r");
+  int width = PWM_PERIOD;
+  while(1) {
+    // Read and clear direction set by IRQ.
+    NVIC_DisableIRQ(EXTI7_0_IRQn);
+    int dir = gDir;
+    gDir = 0;
+    NVIC_EnableIRQ(EXTI7_0_IRQn);
+
+    if (dir) {
+      width += PWM_STEP * dir;
+      if (width < 0)
+        width = 0;
+      else if (width > PWM_PERIOD)
+        width = PWM_PERIOD;
+      printf("New pulse width: %d...\n\r", width);
+    }
+
+    // Update the pulse width.
+    TIM1->CH1CVR = width;
+
+    // Delay to allow rotary encoder debounce.
+    Delay_Ms( 5 );
+  }
+}
