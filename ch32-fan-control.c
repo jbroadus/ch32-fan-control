@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 /* Pin connections:
-   PWM (out TIM1 CH1N) on PD0
+   PWM (out TIM1 CH2) on PA1
    Encoder S1 (in) on PD2
    Encoder S2 (in) on PD3
 
@@ -14,7 +14,7 @@
 
 #define CFGLR_SHIFT(i) ((i) * 4)
 
-/*! Initialize TIM1 for PWM on PD0
+/*! Initialize TIM1 for PWM on PA1
  * 
  * This was adapted from the ch32fun tim1_pwm example by Eric Brombaugh.
  */
@@ -22,12 +22,12 @@ void t1pwm_init( void )
 {
   // Enable GPIOD and TIM1
   RCC->APB2PCENR |=
-    RCC_APB2Periph_GPIOD |
+    RCC_APB2Periph_GPIOA |
     RCC_APB2Periph_TIM1;
 
-  // PD0 is T1CH1N, 50MHz Output alt func, open drain
-  GPIOD->CFGLR &= ~(0xf<<(CFGLR_SHIFT(0)));
-  GPIOD->CFGLR |= (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD_AF)<<CFGLR_SHIFT(0);
+  // PA1 is T1CH2, 10MHz Output alt func, open drain
+  GPIOA->CFGLR &= ~(0xf<<(CFGLR_SHIFT(1)));
+  GPIOA->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_OD_AF)<<CFGLR_SHIFT(1);
 
   // Reset TIM1 to init all regs
   RCC->APB2PRSTR |= RCC_APB2Periph_TIM1;
@@ -45,14 +45,13 @@ void t1pwm_init( void )
   // Reload immediately
   TIM1->SWEVGR |= TIM_UG;
 
-  // Enable CH1N output, positive pol
-  TIM1->CCER |= TIM_CC1NE | TIM_CC1NP;
+  // Enable CH2 output, positive pol
+  TIM1->CCER |= TIM_CC2E | TIM_CC2NP;
 
-  // CH1 Mode is output, PWM1 (CC1S = 00, OC1M = 110)
-  TIM1->CHCTLR1 |= TIM_OC1M_2 | TIM_OC1M_1;
+  // CH2 Mode is output, PWM1 (CC1S = 00, OC1M = 110)
+  TIM1->CHCTLR1 |= TIM_OC2M_2 | TIM_OC2M_1 | TIM_OC2FE;
 
-  // Start at 100% width which is low speed.
-  TIM1->CH1CVR = PWM_PERIOD;
+  TIM1->CH2CVR = 0;
 
   // Enable TIM1 outputs
   TIM1->BDTR |= TIM_MOE;
@@ -131,7 +130,7 @@ int main()
   encoder_init();
 
   printf("Starting...\n\r");
-  int width = PWM_PERIOD;
+  int width = 0;
   while(1) {
     // Read and clear direction set by IRQ.
     NVIC_DisableIRQ(EXTI7_0_IRQn);
@@ -140,8 +139,7 @@ int main()
     NVIC_EnableIRQ(EXTI7_0_IRQn);
 
     if (dir) {
-      // Using TICH1N, so invert.
-      width += PWM_STEP * dir * -1;
+      width += PWM_STEP * dir;
       if (width < 0)
         width = 0;
       else if (width > PWM_PERIOD)
@@ -150,7 +148,7 @@ int main()
     }
 
     // Update the pulse width.
-    TIM1->CH1CVR = width;
+    TIM1->CH2CVR = width;
 
     // Delay to allow rotary encoder debounce.
     Delay_Ms( 5 );
