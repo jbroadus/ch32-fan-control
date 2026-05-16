@@ -3,14 +3,16 @@
 
 /* Pin connections:
    PWM (out) on PD0
-   Encoder TRA (in) on PD2
-   Encoder TRB (in) on PD3
+   Encoder S1 (in) on PD2
+   Encoder S2 (in) on PD3
 
    Standard CPU fans use a 25kHz PWM input.
    We're using a 48MHz HCLK.
 */
 #define PWM_PERIOD 1920
 #define PWM_STEP 200
+
+#define CFGLR_SHIFT(i) ((i) * 4)
 
 /*! Initialize TIM1 for PWM on PD0
  * 
@@ -24,8 +26,8 @@ void t1pwm_init( void )
     RCC_APB2Periph_TIM1;
 
   // PD0 is T1CH1N, 50MHz Output alt func, open drain
-  GPIOD->CFGLR &= ~(0xf<<(4*0));
-  GPIOD->CFGLR |= (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD_AF)<<(4*0);
+  GPIOD->CFGLR &= ~(0xf<<(CFGLR_SHIFT(0)));
+  GPIOD->CFGLR |= (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD_AF)<<CFGLR_SHIFT(0);
 
   // Reset TIM1 to init all regs
   RCC->APB2PRSTR |= RCC_APB2Periph_TIM1;
@@ -59,9 +61,6 @@ void t1pwm_init( void )
   TIM1->CTLR1 |= TIM_CEN;
 }
 
-#define CFGLF_PD2_SHIFT (2 * 4)
-#define CFGLF_PD3_SHIFT (3 * 4)
-
 /*! Set up rotary encoder inputs on PD3 and PD4
  *
  */
@@ -69,17 +68,17 @@ void encoder_init() {
     /* Enable GPIOD and AFIO */
     RCC->APB2PCENR |= RCC_APB2Periph_GPIOD | RCC_APB2Periph_AFIO;
 
-    /* Encoder TRA on PD2 */
-    GPIOD->CFGLR &= ~(0xF << CFGLF_PD2_SHIFT);
-    GPIOD->CFGLR |=  (GPIO_CNF_IN_PUPD << CFGLF_PD2_SHIFT);
+    /* Encoder S1 on PD2 */
+    GPIOD->CFGLR &= ~(0xF << CFGLR_SHIFT(2));
+    GPIOD->CFGLR |=  (GPIO_CNF_IN_PUPD << CFGLR_SHIFT(2));
     GPIOD->OUTDR |=  (1 << 2);
 
-    /* Encoder TRB on PD3 */
-    GPIOD->CFGLR &= ~(0xF << CFGLF_PD3_SHIFT);
-    GPIOD->CFGLR |=  (GPIO_CNF_IN_PUPD << CFGLF_PD3_SHIFT);
+    /* Encoder S2 on PD3 */
+    GPIOD->CFGLR &= ~(0xF << CFGLR_SHIFT(3));
+    GPIOD->CFGLR |=  (GPIO_CNF_IN_PUPD << CFGLR_SHIFT(3));
     GPIOD->OUTDR |=  (1 << 3);
 
-    /* Set up interrupt on TRA (PD2) */
+    /* Set up interrupt on S1 (PD2) */
     AFIO->EXTICR = AFIO_EXTICR_EXTI2_PD;
     EXTI->INTENR = EXTI_INTENR_MR2;
     EXTI->RTENR = EXTI_RTENR_TR2;
