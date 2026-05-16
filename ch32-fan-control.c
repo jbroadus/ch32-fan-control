@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 /* Pin connections:
-   PWM (out) on PD0
+   PWM (out TIM1 CH1N) on PD0
    Encoder S1 (in) on PD2
    Encoder S2 (in) on PD3
 
@@ -81,7 +81,8 @@ void encoder_init() {
     /* Set up interrupt on S1 (PD2) */
     AFIO->EXTICR = AFIO_EXTICR_EXTI2_PD;
     EXTI->INTENR = EXTI_INTENR_MR2;
-    EXTI->RTENR = EXTI_RTENR_TR2;
+    // Falling edge
+    EXTI->FTENR = EXTI_FTENR_TR2;
 
     NVIC_EnableIRQ(EXTI7_0_IRQn);
 }
@@ -91,19 +92,28 @@ void encoder_init() {
 // This mostly works, but I do see some bounce-caused direction errors when
 // moving the wheel quickly. There are better solutions, but this will work
 // for controlling my fan.
-static int gDir;
+static int gDir = 0;
+
+static void rotaryDown() {
+  gDir = -1;
+}
+
+static void rotaryUp() {
+  gDir = 1;
+}
 
 /* EXTI ISR (lines 0-7 share one vector on CH32V003) */
 void EXTI7_0_IRQHandler(void) __attribute__((interrupt));
 void EXTI7_0_IRQHandler(void)
 {
   if (EXTI->INTFR & (1 << 2)) {
-    if (GPIOD->INDR & (1 << 3)) {
-      // Counter-clockwise
-      gDir = 1;
+    // S1 falling edge
+    if ((GPIOD->INDR & (1 << 3)) == 0) {
+      // S2 low - counter-clockwise
+      rotaryDown();
     } else {
-      // Clockwise
-      gDir = -1;
+      // S2 high - clockwise
+      rotaryUp();
     }
 
     // Clear
@@ -130,7 +140,8 @@ int main()
     NVIC_EnableIRQ(EXTI7_0_IRQn);
 
     if (dir) {
-      width += PWM_STEP * dir;
+      // Using TICH1N, so invert.
+      width += PWM_STEP * dir * -1;
       if (width < 0)
         width = 0;
       else if (width > PWM_PERIOD)
